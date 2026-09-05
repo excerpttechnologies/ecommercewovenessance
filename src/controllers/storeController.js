@@ -1844,17 +1844,45 @@ const catalog = asyncHandler(async (req, res) => {
   // Attribute facets, matched case-insensitively so "Ruby Red" and "ruby red" agree.
   const facetMap = {
     colour: "color.primaryColor",
+    secondaryColour: "color.secondaryColor",
     fabric: "saree.fabricType",
+    material: "saree.fabricComposition",
+    pattern: "saree.patternType",
     sareeType: "saree.sareeType",
     occasion: "saree.occasion",
+    borderType: "saree.borderType",
+    borderWidth: "saree.borderWidth",
   };
   Object.entries(facetMap).forEach(([param, path]) => {
     const value = req.query[param];
-    if (value) filter[path] = new RegExp(`^${escapeRegex(value)}$`, "i");
+    if (value) {
+      // Support multiple values separated by comma (OR logic)
+      const values = String(value).split(",").map((v) => v.trim()).filter(Boolean);
+      if (values.length === 1) {
+        filter[path] = new RegExp(`^${escapeRegex(values[0])}$`, "i");
+      } else if (values.length > 1) {
+        filter[path] = { $in: values.map((v) => new RegExp(`^${escapeRegex(v)}$`, "i")) };
+      }
+    }
   });
 
+  // Availability filter: in_stock or out_of_stock
+  if (req.query.availability) {
+    const availValues = String(req.query.availability).split(",").map((v) => v.trim()).filter(Boolean);
+    const stockFilters = availValues.map((val) => {
+      if (val === "in_stock") return { "inventory.currentStock": { $gt: 0 } };
+      if (val === "out_of_stock") return { "inventory.currentStock": { $lte: 0 } };
+      return null;
+    }).filter(Boolean);
+    if (stockFilters.length > 0) {
+      filter.$or = stockFilters;
+    }
+  } else if (req.query.inStock === "true") {
+    // Keep backward compatibility
+    filter["inventory.currentStock"] = { $gt: 0 };
+  }
+
   if (req.query.handloom === "true") filter["saree.handloomStatus"] = "handloom";
-  if (req.query.inStock === "true") filter["inventory.currentStock"] = { $gt: 0 };
 
   const min = Number(req.query.minPrice);
   const max = Number(req.query.maxPrice);
@@ -1947,29 +1975,68 @@ const facets = asyncHandler(async (req, res) => {
       { $match: match },
       {
         $facet: {
+          availability: [
+            {
+              $group: {
+                _id: { $cond: [{ $gt: ["$inventory.currentStock", 0] }, "in_stock", "out_of_stock"] },
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { _id: 1 } },
+          ],
           colours: [
             { $group: { _id: "$color.primaryColor", count: { $sum: 1 } } },
             { $match: { _id: { $nin: [null, ""] } } },
             { $sort: { count: -1 } },
-            { $limit: 24 },
+            { $limit: 50 },
+          ],
+          secondaryColours: [
+            { $group: { _id: "$color.secondaryColor", count: { $sum: 1 } } },
+            { $match: { _id: { $nin: [null, ""] } } },
+            { $sort: { count: -1 } },
+            { $limit: 50 },
           ],
           fabrics: [
             { $group: { _id: "$saree.fabricType", count: { $sum: 1 } } },
             { $match: { _id: { $nin: [null, ""] } } },
             { $sort: { count: -1 } },
-            { $limit: 24 },
+            { $limit: 50 },
+          ],
+          materials: [
+            { $group: { _id: "$saree.fabricComposition", count: { $sum: 1 } } },
+            { $match: { _id: { $nin: [null, ""] } } },
+            { $sort: { count: -1 } },
+            { $limit: 50 },
+          ],
+          patterns: [
+            { $group: { _id: "$saree.patternType", count: { $sum: 1 } } },
+            { $match: { _id: { $nin: [null, ""] } } },
+            { $sort: { count: -1 } },
+            { $limit: 50 },
           ],
           sareeTypes: [
             { $group: { _id: "$saree.sareeType", count: { $sum: 1 } } },
             { $match: { _id: { $nin: [null, ""] } } },
             { $sort: { count: -1 } },
-            { $limit: 24 },
+            { $limit: 50 },
           ],
           occasions: [
             { $group: { _id: "$saree.occasion", count: { $sum: 1 } } },
             { $match: { _id: { $nin: [null, ""] } } },
             { $sort: { count: -1 } },
-            { $limit: 24 },
+            { $limit: 50 },
+          ],
+          borderTypes: [
+            { $group: { _id: "$saree.borderType", count: { $sum: 1 } } },
+            { $match: { _id: { $nin: [null, ""] } } },
+            { $sort: { count: -1 } },
+            { $limit: 50 },
+          ],
+          borderWidths: [
+            { $group: { _id: "$saree.borderWidth", count: { $sum: 1 } } },
+            { $match: { _id: { $nin: [null, ""] } } },
+            { $sort: { count: -1 } },
+            { $limit: 50 },
           ],
           price: [
             {
@@ -1998,10 +2065,19 @@ const facets = asyncHandler(async (req, res) => {
         code: s.subgroupCode,
         group: s.group,
       })),
+      availability: [
+        { value: "in_stock", count: bucket.availability?.find((a) => a._id === "in_stock")?.count ?? 0 },
+        { value: "out_of_stock", count: bucket.availability?.find((a) => a._id === "out_of_stock")?.count ?? 0 },
+      ],
       colours: shape(bucket.colours),
+      secondaryColours: shape(bucket.secondaryColours),
       fabrics: shape(bucket.fabrics),
+      materials: shape(bucket.materials),
+      patterns: shape(bucket.patterns),
       sareeTypes: shape(bucket.sareeTypes),
       occasions: shape(bucket.occasions),
+      borderTypes: shape(bucket.borderTypes),
+      borderWidths: shape(bucket.borderWidths),
       priceRange: {
         min: bucket.price?.[0]?.min ?? null,
         max: bucket.price?.[0]?.max ?? null,

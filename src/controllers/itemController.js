@@ -205,12 +205,6 @@
 // module.exports.OBJECT_SECTIONS = OBJECT_SECTIONS;
 // module.exports.ARRAY_SECTIONS = ARRAY_SECTIONS;
 
-
-
-
-
-
-
 const asyncHandler = require("express-async-handler");
 const buildCrudController = require("../utils/crudFactory");
 const Item = require("../models/Item");
@@ -218,20 +212,47 @@ const Branch = require("../models/Branch");
 const Group = require("../models/Group");
 const Subgroup = require("../models/Subgroup");
 const { assertBranchAccess } = require("../middleware/branchScope");
+const { listAugustProducts } = require("./barcodeLabelController");
 
 /**
  * Every object-valued field group on the Item document. Update merges these
  * shallowly so a form that submits only one tab never wipes the others.
  */
 const OBJECT_SECTIONS = [
-  "identity", "saree", "color", "size", "pricing", "tax", "inventory",
-  "barcodeManagement", "supplier", "aiImageAnalysis", "aiContent", "seo",
-  "care", "styling", "shipping", "returns", "marketplace", "visibility",
-  "relationships", "variantSettings", "aiRecommendation", "reviews",
+  "identity",
+  "saree",
+  "color",
+  "size",
+  "pricing",
+  "tax",
+  "inventory",
+  "barcodeManagement",
+  "supplier",
+  "aiImageAnalysis",
+  "aiContent",
+  "seo",
+  "care",
+  "styling",
+  "shipping",
+  "returns",
+  "marketplace",
+  "visibility",
+  "relationships",
+  "variantSettings",
+  "aiRecommendation",
+  "reviews",
 ];
 
 /** Array-valued field groups — replaced wholesale, since the UI sends the full list. */
-const ARRAY_SECTIONS = ["images", "videos", "gifs", "documents", "warehouseAllocations", "variants", "faqs"];
+const ARRAY_SECTIONS = [
+  "images",
+  "videos",
+  "gifs",
+  "documents",
+  "warehouseAllocations",
+  "variants",
+  "faqs",
+];
 
 /**
  * Section 32 is maintained by the system (orders, views, reviews) — never by the
@@ -273,7 +294,12 @@ const flattenForExport = (i) => ({
 
 const baseController = buildCrudController(Item, {
   entityName: "Item",
-  searchFields: ["identity.productName", "identity.itemCode", "identity.sku", "identity.barcode"],
+  searchFields: [
+    "identity.productName",
+    "identity.itemCode",
+    "identity.sku",
+    "identity.barcode",
+  ],
   filterFields: ["status", "lifecycleStage", "group", "subgroup"],
   branchScoped: true,
   editableFields: [...OBJECT_SECTIONS, ...ARRAY_SECTIONS, "status"],
@@ -305,12 +331,21 @@ const baseController = buildCrudController(Item, {
       productName: row["Product Name"] || row["productName"],
       sku: row["SKU"] || "",
     },
-    saree: { sareeType: row["Saree Type"] || "", fabricType: row["Fabric Type"] || "" },
+    saree: {
+      sareeType: row["Saree Type"] || "",
+      fabricType: row["Fabric Type"] || "",
+    },
     pricing: {
       mrp: row["MRP"] ? Number(row["MRP"]) : undefined,
-      sellingPrice: row["Selling Price"] ? Number(row["Selling Price"]) : undefined,
+      sellingPrice: row["Selling Price"]
+        ? Number(row["Selling Price"])
+        : undefined,
     },
-    inventory: { currentStock: row["Current Stock"] ? Number(row["Current Stock"]) : undefined },
+    inventory: {
+      currentStock: row["Current Stock"]
+        ? Number(row["Current Stock"])
+        : undefined,
+    },
     supplier: { supplierName: row["Supplier"] || "" },
   }),
 });
@@ -324,20 +359,30 @@ async function resolveAndGenerateCodes(body) {
   if (!body.branch) throw new Error("branch is required");
   if (!body.group) throw new Error("group is required");
   if (!body.subgroup) throw new Error("subgroup is required");
-  if (!body.identity?.productName) throw new Error("identity.productName is required");
+  if (!body.identity?.productName)
+    throw new Error("identity.productName is required");
 
   const [branch, group, subgroup] = await Promise.all([
     Branch.findOne({ _id: body.branch, isDeleted: { $ne: true } }),
     Group.findOne({ _id: body.group, isDeleted: { $ne: true } }),
     Subgroup.findOne({ _id: body.subgroup, isDeleted: { $ne: true } }),
   ]);
-  if (!branch) throw new Error("Branch not found — reselect the working branch in the sidebar");
+  if (!branch)
+    throw new Error(
+      "Branch not found — reselect the working branch in the sidebar",
+    );
   if (!group) throw new Error("Group not found");
   if (!subgroup) throw new Error("Subgroup not found");
-  if (String(group.branch) !== String(branch._id)) throw new Error("Group does not belong to this branch");
-  if (String(subgroup.group) !== String(group._id)) throw new Error("Subgroup does not belong to this group");
+  if (String(group.branch) !== String(branch._id))
+    throw new Error("Group does not belong to this branch");
+  if (String(subgroup.group) !== String(group._id))
+    throw new Error("Subgroup does not belong to this group");
 
-  const itemCode = await Item.generateItemCode(branch.branchCode, group.groupCode, subgroup.subgroupCode);
+  const itemCode = await Item.generateItemCode(
+    branch.branchCode,
+    group.groupCode,
+    subgroup.subgroupCode,
+  );
   const barcode = await Item.generateBarcode();
   return { itemCode, barcode };
 }
@@ -378,7 +423,10 @@ const create = asyncHandler(async (req, res) => {
 });
 
 const update = asyncHandler(async (req, res) => {
-  const item = await Item.findOne({ _id: req.params.id, isDeleted: { $ne: true } });
+  const item = await Item.findOne({
+    _id: req.params.id,
+    isDeleted: { $ne: true },
+  });
   if (!item) {
     res.status(404);
     throw new Error("Item not found");
@@ -418,6 +466,6 @@ const update = asyncHandler(async (req, res) => {
   res.json({ success: true, data: item });
 });
 
-module.exports = { ...baseController, create, update };
+module.exports = { ...baseController, create, update, listAugustProducts };
 module.exports.OBJECT_SECTIONS = OBJECT_SECTIONS;
 module.exports.ARRAY_SECTIONS = ARRAY_SECTIONS;
