@@ -11,6 +11,13 @@ const subgroupSchema = new mongoose.Schema(
     branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch", required: true, index: true },
     group: { type: mongoose.Schema.Types.ObjectId, ref: "Group", required: true, index: true },
 
+    // The ERP item this row mirrors. Same arrangement as
+    // Group.erpProductGroup - see the note there.
+    erpItem: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      index: true,
+    },
     subgroupName: { type: String, required: [true, "Subgroup name is required"], trim: true, maxlength: 120 },
     subgroupCode: { type: String, required: true, uppercase: true, trim: true },
     description: { type: String, trim: true, maxlength: 500 },

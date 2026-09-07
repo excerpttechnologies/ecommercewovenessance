@@ -7,6 +7,15 @@ const mongoose = require("mongoose");
  */
 const branchSchema = new mongoose.Schema(
   {
+    // Which GROO RETAIL ERP business (the ERP calls them branches) this
+    // branch corresponds to. Set on the Branch management screen; nothing
+    // links the two masters otherwise, so it has to be stated, not inferred.
+    // Not a ref: the target is in a collection the ERP owns.
+    erpBusinessId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      index: true,
+    },
     branchName: {
       type: String,
       required: [true, "Branch name is required"],

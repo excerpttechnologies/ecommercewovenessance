@@ -73,6 +73,7 @@ const router = express.Router();
 router.get("/branches", ctrl.listBranches);
 router.get("/catalog", ctrl.catalog);
 router.get("/facets", ctrl.facets);
+router.get("/header-categories", ctrl.headerCategories);
 router.get("/suggest", ctrl.suggest);
 router.get("/product/:slug", ctrl.productDetail);
 router.post("/product/:id/view", ctrl.recordView);

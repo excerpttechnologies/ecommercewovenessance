@@ -93,10 +93,7 @@
 const asyncHandler = require("express-async-handler");
 const BarcodeLabel = require("../models/BarcodeLabel");
 
-// Fields as they actually exist on real barcodeLabel documents, plus the
-// original/legacy names kept for backward compatibility with any records
-// that may still use them. barcodeNo / barcodeGenerated are included so
-// barcode search actually matches.
+// Full field list — used ONLY for projection (which columns to return).
 const LABEL_FIELDS = [
   "grcId",
   "supplierId",
@@ -150,6 +147,28 @@ const LABEL_FIELDS = [
   "createdAt",
 ];
 
+// Narrow field list — used ONLY for the search $or. Only identifier/text
+// fields belong here. Price, tax, qty, discount fields are intentionally
+// excluded: matching a search term against those was making almost every
+// document match (21417 out of ~21417 total), i.e. the search wasn't
+// restricting anything.
+const SEARCH_FIELDS = [
+  "grcId",
+  "supplierId",
+  "groupId",
+  "oldBarcode",
+  "itemCode",
+  "barcodeNo",
+  "barcodeGenerated",
+  "batchUnique",
+  "billSlNo",
+  "billsNo",
+  "billingNo",
+  "supplierDescription",
+  "printDescription",
+  "hsn",
+];
+
 const projection = LABEL_FIELDS.join(" ");
 
 /** Escapes user input so it's safe to embed inside a MongoDB $regex string. */
@@ -162,12 +181,14 @@ const listAugustProducts = asyncHandler(async (req, res) => {
   const search = String(req.query.q || "").trim();
   const statusFilter = String(req.query.status || "").trim();
 
+  // NOTE: there used to be an `imageUrl: { $exists: true, $nin: ["", null] }`
+  // gate here. It never actually ran (see models/BarcodeLabel.js — strictQuery
+  // was stripping the whole filter), and switching it on would have hidden 563
+  // of the ~21.4k rows staff already work with, including every record matching
+  // a description search. The table renders a "No image" placeholder by design,
+  // so rows without artwork belong in the list.
   const filter = {
-    imageUrl: { $exists: true, $nin: ["", null] },
     createdAt: { $gte: new Date("2026-08-01T00:00:00.000Z") },
-    // NOTE: the old hardcoded `itemCode: /^8A/i` filter was removed here —
-    // it required every itemCode to start with "8A", which real documents
-    // (e.g. "sk-10") never match, and was silently filtering out everything.
   };
 
   if (statusFilter) {
@@ -178,9 +199,9 @@ const listAugustProducts = asyncHandler(async (req, res) => {
     const safeSearch = escapeRegExp(search);
     filter.$and = [
       {
-        $or: LABEL_FIELDS.filter((field) => field !== "createdAt").map(
-          (field) => ({ [field]: { $regex: safeSearch, $options: "i" } }),
-        ),
+        $or: SEARCH_FIELDS.map((field) => ({
+          [field]: { $regex: safeSearch, $options: "i" },
+        })),
       },
     ];
   }
@@ -196,13 +217,9 @@ const listAugustProducts = asyncHandler(async (req, res) => {
       .lean(),
     BarcodeLabel.countDocuments(filter),
   ]);
-  console.log("barcodeLabel filtered query", {
-    filter,
-    totalFilteredRecords: total,
-    recordsReturned: documents.length,
-    page,
-    limit,
-  });
+
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.set("Pragma", "no-cache");
 
   res.json({
     success: true,

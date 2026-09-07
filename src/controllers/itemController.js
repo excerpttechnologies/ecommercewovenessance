@@ -211,6 +211,7 @@ const Item = require("../models/Item");
 const Branch = require("../models/Branch");
 const Group = require("../models/Group");
 const Subgroup = require("../models/Subgroup");
+const { mirrorErpSelection } = require("../utils/erpMirror");
 const { assertBranchAccess } = require("../middleware/branchScope");
 const { listAugustProducts } = require("./barcodeLabelController");
 
@@ -388,6 +389,21 @@ async function resolveAndGenerateCodes(body) {
 }
 
 const create = asyncHandler(async (req, res) => {
+  // The Create form picks an ERP group and item. Neither can be stored on
+  // the Item directly - group/subgroup are required refs to this app's own
+  // collections and the item code is built from their codes - so the pair is
+  // mirrored into a local Group/Subgroup first, creating them if this branch
+  // has not used that pair before. See utils/erpMirror.js.
+  if (req.body.erpGroup || req.body.erpItem) {
+    const mirrored = await mirrorErpSelection({
+      branchId: req.body.branch,
+      erpGroupId: req.body.erpGroup,
+      erpItemId: req.body.erpItem,
+    });
+    req.body.group = mirrored.group;
+    req.body.subgroup = mirrored.subgroup;
+  }
+
   const { itemCode, barcode } = await resolveAndGenerateCodes(req.body);
 
   const payload = {

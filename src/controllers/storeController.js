@@ -1627,6 +1627,8 @@ const Group = require("../models/Group");
 const Subgroup = require("../models/Subgroup");
 const Item = require("../models/Item");
 const Visit = require("../models/Visit");
+const ProductGroup = require("../models/ProductGroup");
+const StorefrontGroup = require("../models/StorefrontGroup");
 const {
   productSlug,
   branchSlug,
@@ -2295,6 +2297,54 @@ const recordVisit = asyncHandler(async (req, res) => {
   res.status(202).json({ success: true });
 });
 
+
+// GET /api/woven-essence/store/header-categories
+// The category rail in the shop header.
+//
+// Categories are ERP Product Groups that an admin has published on the Groups
+// screen — publishing is what puts one here, so an unpublished group is simply
+// absent. The flag lives in Woven Essence's storefrontGroups side table, not
+// on the ERP's rows; see models/StorefrontGroup.js.
+//
+// Subcategories are that group's children in the ERP's own hierarchy: a
+// productgroup with parentId set is a subgroup of the row it points at.
+// Children come through with their parent and are NOT published separately —
+// publishing a category publishes what sits under it, which is what "publish
+// DUPATTA and it appears" means to the person clicking the toggle.
+//
+// Not branch-filtered. Publishing is an explicit editorial decision about the
+// storefront as a whole, and these rows carry an ERP business rather than a
+// Woven Essence branch, so there is nothing here to match a branch against.
+const headerCategories = asyncHandler(async (req, res) => {
+  const flags = await StorefrontGroup.find({ isPublished: true })
+    .select("productGroup")
+    .lean();
+  const ids = flags.map((f) => f.productGroup);
+  if (!ids.length) return res.json({ success: true, data: [] });
+
+  // The published groups themselves, and every child of one, in two queries.
+  const [groups, children] = await Promise.all([
+    ProductGroup.find({ _id: { $in: ids } }).select("name").sort("name").lean(),
+    ProductGroup.find({ parentId: { $in: ids } }).select("name parentId").sort("name").lean(),
+  ]);
+
+  const subsByParent = new Map();
+  children.forEach((child) => {
+    const key = String(child.parentId);
+    if (!subsByParent.has(key)) subsByParent.set(key, []);
+    subsByParent.get(key).push({ id: String(child._id), name: child.name || "" });
+  });
+
+  res.json({
+    success: true,
+    data: groups.map((g) => ({
+      id: String(g._id),
+      name: g.name || "",
+      subs: subsByParent.get(String(g._id)) || [],
+    })),
+  });
+});
+
 module.exports = {
   // Reused by recentlyViewedController so the card shape and the visibility
   // gate are defined once, not copied.
@@ -2309,4 +2359,5 @@ module.exports = {
   productDetail,
   recordView,
   cardsByIds,
+  headerCategories,
 };

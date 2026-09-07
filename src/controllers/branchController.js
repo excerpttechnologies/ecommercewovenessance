@@ -358,7 +358,8 @@ const getBranch = asyncHandler(async (req, res) => {
 
 // POST /api/woven-essence/branches
 const createBranch = asyncHandler(async (req, res) => {
-  const { branchName, address, location, gstNumber, contact, status, lifecycleStage } = req.body;
+  const { branchName, address, location, gstNumber, contact, status, lifecycleStage, erpBusinessId } =
+    req.body;
 
   if (!branchName || !branchName.trim()) {
     res.status(400);
@@ -370,6 +371,9 @@ const createBranch = asyncHandler(async (req, res) => {
   const branch = await Branch.create({
     branchName: branchName.trim(),
     branchCode,
+    // Which ERP business this branch is. Blank until someone sets it on the
+    // Branch management screen; nothing can infer it.
+    erpBusinessId: erpBusinessId || null,
     address,
     location,
     gstNumber,
@@ -392,7 +396,17 @@ const updateBranch = asyncHandler(async (req, res) => {
     throw new Error("Branch not found");
   }
 
-  const editable = ["branchName", "address", "location", "gstNumber", "contact", "status"];
+  // erpBusinessId is which ERP business this branch is; it decides where
+  // products filed under the sidebar working branch actually land.
+  const editable = [
+    "branchName",
+    "address",
+    "location",
+    "gstNumber",
+    "contact",
+    "status",
+    "erpBusinessId",
+  ];
   editable.forEach((field) => {
     if (req.body[field] !== undefined) branch[field] = req.body[field];
   });

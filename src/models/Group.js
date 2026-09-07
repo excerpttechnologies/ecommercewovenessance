@@ -7,6 +7,14 @@ const mongoose = require("mongoose");
 const groupSchema = new mongoose.Schema(
   {
     branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch", required: true, index: true },
+    // The ERP productgroup this row mirrors, when it was created by
+    // publishing one. The ERP owns the master; this is the local record
+    // items and item codes hang off. Null for groups made by hand.
+    erpProductGroup: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      index: true,
+    },
     groupName: { type: String, required: [true, "Group name is required"], trim: true, maxlength: 120 },
     // Short code used inside auto-generated item codes, e.g. "SLK" for Silk Sarees
     groupCode: {

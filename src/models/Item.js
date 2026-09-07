@@ -259,6 +259,10 @@ const barcodeManagementSchema = sub({
   },
   internalBarcode: String, // mirrors identity.barcode, locked
   supplierBarcode: String,
+  // The ERP barcodeLabel row this product was created from, picked with the
+  // Product dropdown on the create form. Not a ref: the target lives in a
+  // collection the ERP owns, so Mongoose must not try to populate it.
+  sourceBarcodeLabel: Schema.Types.ObjectId,
   manufacturerBarcode: String,
   barcodeImageUrl: String,
   printTemplate: String,
