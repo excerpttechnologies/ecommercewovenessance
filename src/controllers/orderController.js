@@ -285,7 +285,10 @@ const listOrders = asyncHandler(async (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
 
   const filter = { customer: req.customer._id };
-  if (req.query.status) filter.status = req.query.status;
+  const requestedStatus = String(req.query.status || "").trim();
+  if (requestedStatus && requestedStatus.toLowerCase() !== "all") {
+    filter.status = requestedStatus;
+  }
 
   const [total, orders] = await Promise.all([
     Order.countDocuments(filter),

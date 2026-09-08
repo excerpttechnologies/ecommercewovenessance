@@ -251,7 +251,11 @@ const addressSchema = new Schema(
   {
     label: { type: String, trim: true, default: "Home" },
     fullName: { type: String, trim: true },
-    phone: { type: String, trim: true },
+    phone: {
+      type: String,
+      trim: true,
+      match: [/^[0-9]{10}$/, "Enter a valid 10-digit phone number"],
+    },
     line1: { type: String, trim: true },
     line2: { type: String, trim: true },
     landmark: { type: String, trim: true },
@@ -281,7 +285,7 @@ const customerSchema = new Schema(
     phone: {
       type: String,
       trim: true,
-      match: [/^[0-9+\-\s()]{7,20}$/, "Enter a valid phone number"],
+      match: [/^[0-9]{10}$/, "Enter a valid 10-digit phone number"],
     },
 
     // Absent for Google-only accounts (next release), so not required here.

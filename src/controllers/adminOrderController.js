@@ -522,7 +522,10 @@ const listOrders = asyncHandler(async (req, res) => {
     Object.assign(filter, orderBranchFilter(branchId));
   }
 
-  if (req.query.status) filter.status = req.query.status;
+  const requestedStatus = String(req.query.status || "").trim();
+  if (requestedStatus && requestedStatus.toLowerCase() !== "all") {
+    filter.status = requestedStatus;
+  }
   if (req.query.paymentMethod) filter["payment.method"] = req.query.paymentMethod;
 
   if (req.query.q) {
@@ -736,16 +739,38 @@ const updateStatus = asyncHandler(async (req, res) => {
   }
 
   // A multi-store order can't honestly be "packed" until every store's items
-  // have reached the warehouse. Warned rather than blocked, because staff
-  // sometimes tick the pick list after the fact.
+  // have reached the warehouse. For a same-branch order, though, the branch
+  // that is marking it packed is the one already handling the stock, so
+  // blocking on a separate collection tick is a false negative.
   if (status === "packed") {
     const pending = (order.sourceBranches || []).filter((s) => !s.collected);
-    if (pending.length > 0 && req.body?.force !== true) {
+    const assignedId = req.adminUser?.assignedBranch ? String(req.adminUser.assignedBranch) : "";
+    const sameBranchPending = assignedId
+      ? pending.filter((s) => String(s.branch) === assignedId)
+      : [];
+    // Allow packing when either:
+    // - the admin's assigned branch has collected all pending source rows,
+    // - OR the order itself belongs to the admin's assigned branch (same-branch order).
+    const canPackForThisBranch =
+      assignedId &&
+      pending.length > 0 &&
+      (sameBranchPending.length === pending.length || String(order.branch) === assignedId);
+
+    if (pending.length > 0 && req.body?.force !== true && !canPackForThisBranch) {
       res.status(409);
       throw new Error(
         `Still waiting on ${pending.map((s) => s.branchName || "a store").join(", ")}. ` +
           "Tick them off on the pick list, or resend with force to pack anyway."
       );
+    }
+
+    if (assignedId) {
+      for (const row of order.sourceBranches || []) {
+        if (String(row.branch) === assignedId) {
+          row.collected = true;
+          row.collectedAt = new Date();
+        }
+      }
     }
   }
 
