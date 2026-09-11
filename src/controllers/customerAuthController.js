@@ -509,6 +509,7 @@
  
 const asyncHandler = require("express-async-handler");
 const Customer = require("../models/Customer");
+const { normalisePhone } = require("../utils/phone");
 const Branch = require("../models/Branch");
 const { signCustomerToken } = require("../middleware/customerAuth");
 const google = require("../services/googleAuthService");
@@ -531,7 +532,7 @@ function normaliseEmail(value) {
 const register = asyncHandler(async (req, res) => {
   const name = String(req.body.name || "").trim();
   const email = normaliseEmail(req.body.email);
-  const phone = String(req.body.phone || "").trim();
+  const phone = normalisePhone(req.body.phone);
   const password = String(req.body.password || "");
  
   if (!name) {
@@ -624,7 +625,7 @@ const updateProfile = asyncHandler(async (req, res) => {
   const customer = req.customer;
  
   if (req.body.name !== undefined) customer.name = String(req.body.name).trim();
-  if (req.body.phone !== undefined) customer.phone = String(req.body.phone).trim();
+  if (req.body.phone !== undefined) customer.phone = normalisePhone(req.body.phone);
  
   if (req.body.preferredBranch !== undefined) {
     const id = req.body.preferredBranch;
@@ -684,6 +685,32 @@ const addAddress = asyncHandler(async (req, res) => {
   if (!address.line1 || !address.city || !address.pincode) {
     res.status(400);
     throw new Error("Address line, city and pincode are required");
+  }
+
+  const addressKey = [
+    address.fullName,
+    address.phone,
+    address.line1,
+    address.line2,
+    address.landmark,
+    address.city,
+    address.state,
+    address.pincode,
+    address.country,
+  ].map((value) => String(value || "").trim().toLowerCase()).join("|");
+  const duplicate = customer.addresses.find((saved) => [
+    saved.fullName,
+    saved.phone,
+    saved.line1,
+    saved.line2,
+    saved.landmark,
+    saved.city,
+    saved.state,
+    saved.pincode,
+    saved.country,
+  ].map((value) => String(value || "").trim().toLowerCase()).join("|") === addressKey);
+  if (duplicate) {
+    return res.status(200).json({ success: true, data: customer.toPublic(), message: "Address already saved" });
   }
  
   // The first address saved becomes the default for both, otherwise a new

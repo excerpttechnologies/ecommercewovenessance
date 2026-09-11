@@ -251,11 +251,7 @@ const addressSchema = new Schema(
   {
     label: { type: String, trim: true, default: "Home" },
     fullName: { type: String, trim: true },
-    phone: {
-      type: String,
-      trim: true,
-      match: [/^[0-9]{10}$/, "Enter a valid 10-digit phone number"],
-    },
+    phone: { type: String, trim: true },
     line1: { type: String, trim: true },
     line2: { type: String, trim: true },
     landmark: { type: String, trim: true },
@@ -285,7 +281,7 @@ const customerSchema = new Schema(
     phone: {
       type: String,
       trim: true,
-      match: [/^[0-9]{10}$/, "Enter a valid 10-digit phone number"],
+      match: [/^\d{10}$/, "Phone number must contain exactly 10 digits"],
     },
 
     // Absent for Google-only accounts (next release), so not required here.
@@ -363,6 +359,24 @@ customerSchema.methods.matchPassword = async function matchPassword(plain) {
 
 /** Shape sent to the browser — never includes the hash. */
 customerSchema.methods.toPublic = function toPublic() {
+  const seen = new Set();
+  const addresses = (this.addresses || []).filter((address) => {
+    const key = [
+      address.fullName,
+      address.phone,
+      address.line1,
+      address.line2,
+      address.landmark,
+      address.city,
+      address.state,
+      address.pincode,
+      address.country,
+    ].map((value) => String(value || "").trim().toLowerCase()).join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
   return {
     id: this._id,
     name: this.name,
@@ -370,7 +384,7 @@ customerSchema.methods.toPublic = function toPublic() {
     phone: this.phone || "",
     avatarUrl: this.avatarUrl || "",
     preferredBranch: this.preferredBranch || null,
-    addresses: this.addresses || [],
+    addresses,
     emailVerified: this.emailVerified,
     createdAt: this.createdAt,
   };

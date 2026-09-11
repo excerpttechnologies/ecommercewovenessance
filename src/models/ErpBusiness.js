@@ -17,7 +17,7 @@ const erpBusinessSchema = new mongoose.Schema(
     state: { type: String, default: "" },
     country: { type: String, default: "" },
     zipCode: { type: String, default: "" },
-    mobile: { type: String, default: "" },
+    mobile: { type: String, default: "", match: [/^\d{10}$/, "Phone number must contain exactly 10 digits"] },
     email: { type: String, default: "" },
     gstin: { type: String, default: "" },
     // The ERP stores this as the string "Active", not a boolean.

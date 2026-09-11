@@ -692,6 +692,7 @@ const Cart = require("../models/Cart");
 const { priceLines, reserveStock, publicOrder } = require("./checkoutController");
 const razorpay = require("../services/razorpayService");
 const email = require("../services/emailService");
+const { normalisePhone } = require("../utils/phone");
 
 /**
  * Group shopping.
@@ -1088,7 +1089,7 @@ const confirmSession = asyncHandler(async (req, res) => {
   session.paymentMode = mode;
   session.shippingAddress = {
     fullName: String(a.fullName).trim(),
-    phone: String(a.phone).trim(),
+    phone: normalisePhone(a.phone, { required: true }),
     line1: String(a.line1).trim(),
     line2: String(a.line2 || "").trim(),
     landmark: String(a.landmark || "").trim(),

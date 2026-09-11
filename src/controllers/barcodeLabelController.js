@@ -180,6 +180,7 @@ function escapeRegExp(value) {
 const listAugustProducts = asyncHandler(async (req, res) => {
   const search = String(req.query.q || "").trim();
   const statusFilter = String(req.query.status || "").trim();
+  const seriesFilter = String(req.query.series || "").trim();
 
   // NOTE: there used to be an `imageUrl: { $exists: true, $nin: ["", null] }`
   // gate here. It never actually ran (see models/BarcodeLabel.js — strictQuery
@@ -195,15 +196,31 @@ const listAugustProducts = asyncHandler(async (req, res) => {
     filter.status = new RegExp(`^${escapeRegExp(statusFilter)}$`, "i");
   }
 
+  // If a series parameter is provided (e.g. series=8A) restrict rows to those
+  // whose identifier starts with the series string. This checks the ERP's
+  // identifier fields so the frontend can ask the server for only the 8A series.
+  if (seriesFilter) {
+    const escaped = escapeRegExp(seriesFilter);
+    const anchored = new RegExp(`^${escaped}`, "i");
+    filter.$and = filter.$and || [];
+    filter.$and.push({
+      $or: [
+        { itemCode: anchored },
+        { barcodeNo: anchored },
+        { barcodeGenerated: anchored },
+        { oldBarcode: anchored },
+      ],
+    });
+  }
+
   if (search) {
     const safeSearch = escapeRegExp(search);
-    filter.$and = [
-      {
-        $or: SEARCH_FIELDS.map((field) => ({
-          [field]: { $regex: safeSearch, $options: "i" },
-        })),
-      },
-    ];
+    filter.$and = filter.$and || [];
+    filter.$and.push({
+      $or: SEARCH_FIELDS.map((field) => ({
+        [field]: { $regex: safeSearch, $options: "i" },
+      })),
+    });
   }
 
   const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);

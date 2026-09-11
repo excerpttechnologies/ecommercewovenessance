@@ -51,7 +51,7 @@ const branchSchema = new mongoose.Schema(
     },
     contact: {
       name: { type: String, trim: true },
-      phone: { type: String, trim: true },
+      phone: { type: String, trim: true, match: [/^\d{10}$/, "Phone number must contain exactly 10 digits"] },
       email: { type: String, trim: true, lowercase: true },
     },
     // Operational toggle (Section 4: Status active/inactive)

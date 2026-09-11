@@ -1249,6 +1249,7 @@ const Branch = require("../models/Branch");
 const razorpay = require("../services/razorpayService");
 const email = require("../services/emailService");
 const { buildCartView, LIVE_ITEM } = require("./cartController");
+const { normalisePhone } = require("../utils/phone");
 
 /**
  * Checkout.
@@ -1295,7 +1296,7 @@ function requiredAddressFields(address, label) {
 function pickAddress(a) {
   return {
     fullName: String(a.fullName || "").trim(),
-    phone: String(a.phone || "").trim(),
+    phone: normalisePhone(a.phone, { required: true }),
     line1: String(a.line1 || "").trim(),
     line2: String(a.line2 || "").trim(),
     landmark: String(a.landmark || "").trim(),
@@ -1620,7 +1621,7 @@ const getCheckout = asyncHandler(async (req, res) => {
       /** The store that packs and ships — one parcel however many stores. */
       fulfilledBy,
       blocker: res.locals.checkoutBlocker || null,
-      addresses: req.customer.addresses || [],
+      addresses: req.customer.toPublic().addresses,
       customer: { name: req.customer.name, email: req.customer.email, phone: req.customer.phone || "" },
       branch: fulfilledBy,
       payment: {
