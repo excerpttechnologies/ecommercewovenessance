@@ -391,16 +391,17 @@ async function buildCartView(cart) {
       item.lifecycleStage === "published" &&
       item.visibility?.onlineSaleEnabled !== false;
 
-    const stock = item.inventory?.currentStock || 0;
+    // Stock is not a blocker anywhere in the shop: the catalogue is published
+    // from the ERP well ahead of stock figures, so treating zero as "can't buy"
+    // made almost every saree unpurchasable. Availability now turns on whether
+    // the saree is still listed and priced.
     const sellingPrice = item.pricing?.sellingPrice ?? null;
 
     let issue = null;
     if (!live) issue = "This saree is no longer available";
     else if (sellingPrice == null) issue = "Price on request — contact us to buy";
-    else if (stock <= 0) issue = "Sold out";
-    else if (line.quantity > stock) issue = `Only ${stock} left in stock`;
 
-    const quantity = Math.min(line.quantity, Math.max(stock, 1));
+    const quantity = line.quantity;
     const available = !issue;
 
     // branch is populated, so it arrives as a document rather than an id.
@@ -458,7 +459,8 @@ async function buildCartView(cart) {
       gstRate: item.tax?.gstRate ?? null,
       quantity,
       lineTotal: available && sellingPrice != null ? sellingPrice * quantity : null,
-      stock,
+      // Reported for information only — it no longer limits what can be bought.
+      stock: item.inventory?.currentStock ?? 0,
       unit: item.inventory?.unitOfMeasure || "pcs",
       available,
       issue,
@@ -524,12 +526,7 @@ const addToCart = asyncHandler(async (req, res) => {
     throw new Error("This saree is priced on request — please contact the store");
   }
 
-  const stock = item.inventory?.currentStock || 0;
-  if (stock <= 0) {
-    res.status(409);
-    throw new Error("This saree is sold out");
-  }
-
+  // Deliberately no sold-out check: anything visible in the shop can be carted.
   const cart = await getOrCreateCart(req.customer._id);
 
   // NOTE: there is deliberately no cross-store check here any more. A cart may
@@ -538,15 +535,7 @@ const addToCart = asyncHandler(async (req, res) => {
   const existing = cart.lines.find((l) => String(l.item) === String(item._id));
   const requested = (existing?.quantity || 0) + quantity;
 
-  if (requested > stock) {
-    res.status(409);
-    throw new Error(
-      existing
-        ? `You already have ${existing.quantity} of these, and only ${stock} are in stock`
-        : `Only ${stock} of these are in stock`
-    );
-  }
-
+  // Only the per-line cap applies now; stock does not limit the quantity.
   if (existing) existing.quantity = Math.min(requested, MAX_QTY_PER_LINE);
   else cart.lines.push({ item: item._id, quantity });
 
@@ -578,12 +567,7 @@ const updateLine = asyncHandler(async (req, res) => {
   if (quantity === 0) {
     line.deleteOne();
   } else {
-    const item = await Item.findOne({ _id: line.item, ...LIVE_ITEM }).select("inventory.currentStock");
-    const stock = item?.inventory?.currentStock || 0;
-    if (quantity > stock) {
-      res.status(409);
-      throw new Error(`Only ${stock} left in stock`);
-    }
+    // Stock does not cap the quantity; only MAX_QTY_PER_LINE, checked above.
     line.quantity = quantity;
   }
 

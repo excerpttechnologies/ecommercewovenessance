@@ -86,7 +86,7 @@ async function resolveLabels(rows) {
 /** GET /product-items — paginated list, newest first, same as the ERP's. */
 const list = asyncHandler(async (req, res) => {
   const filter = await buildFilter(req.query);
-  const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 500);
+  const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 500);
   const page = Math.max(Number(req.query.page) || 1, 1);
 
   const [docs, total] = await Promise.all([

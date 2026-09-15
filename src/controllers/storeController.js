@@ -1729,7 +1729,12 @@ function toCard(item) {
     sellingPrice: selling ?? null,
     discountPercent,
     currency: item.pricing?.currency || "INR",
-    inStock: (item.inventory?.currentStock || 0) > 0,
+    // Anything still listed can be bought. currentStock is 0 on almost every
+    // published product because bulk publish never set it, so gating the shop on
+    // it hid the entire catalogue. bulkPublishFromLabels now fills it from the
+    // ERP row's IN_STOCK/SOLD status, so once existing rows are backfilled this
+    // can become (item.inventory?.currentStock || 0) > 0 again.
+    inStock: true,
     rating: item.reviews?.averageRating || 0,
     reviewCount: item.reviews?.totalReviews || 0,
     image: hero ? { url: hero.url, altText: hero.altText || item.identity?.productName } : null,
@@ -1825,6 +1830,51 @@ async function resolveBranch(idOrSlug) {
   return null;
 }
 
+const isObjectId = (value) => /^[a-f\d]{24}$/i.test(String(value));
+
+// The category rail sends an ERP Product Group id (see headerCategories), but an
+// Item is filed under a Woven Essence Group. Those are two different id spaces,
+// so matching Item.group against the id straight off the URL never hit anything
+// and every category click came back empty. groups.erpProductGroup is the bridge
+// the data already carries, so resolve through it. An id that is already a Woven
+// Essence group is passed through unchanged, which keeps older links working.
+async function groupFilterFor(value) {
+  if (!value || !isObjectId(value)) return null;
+  const id = String(value).trim();
+
+  const groups = await Group.find({
+    $or: [{ _id: id }, { erpProductGroup: id }],
+    isDeleted: { $ne: true },
+  })
+    .select("_id")
+    .lean();
+
+  if (!groups.length) return id;
+  // One ERP category can exist as a group per branch, so match them all.
+  return groups.length === 1 ? groups[0]._id : { $in: groups.map((g) => g._id) };
+}
+
+// Subcategories in the rail are the ERP group's own children, and nothing in the
+// catalogue is filed under one. Resolve where the link exists and otherwise drop
+// the parameter, so a subcategory click narrows to its parent category rather
+// than rendering an empty page.
+async function subgroupFilterFor(value) {
+  if (!value || !isObjectId(value)) return null;
+  const id = String(value).trim();
+
+  const subgroups = await Subgroup.find({
+    $or: [{ _id: id }, { erpItem: id }],
+    isDeleted: { $ne: true },
+  })
+    .select("_id")
+    .lean();
+
+  if (!subgroups.length) return null;
+  return subgroups.length === 1
+    ? subgroups[0]._id
+    : { $in: subgroups.map((s) => s._id) };
+}
+
 // GET /api/woven-essence/store/catalog
 // Query: branch, q, group, subgroup, colour, fabric, sareeType, occasion,
 //        minPrice, maxPrice, sort, page, limit
@@ -1840,8 +1890,30 @@ const catalog = asyncHandler(async (req, res) => {
   const branchClause = branchFilterFor(branches);
   if (branchClause) filter.branch = branchClause;
 
-  if (req.query.group) filter.group = req.query.group;
-  if (req.query.subgroup) filter.subgroup = req.query.subgroup;
+  const groupClause = await groupFilterFor(req.query.group);
+  if (groupClause) filter.group = groupClause;
+  const subgroupClause = await subgroupFilterFor(req.query.subgroup);
+  if (subgroupClause) filter.subgroup = subgroupClause;
+
+  // ?name= narrows to one product name within a category — what the header's
+  // hover menu links to. Matched whole and case-insensitively so "15-SA-PURE"
+  // cannot also drag in "15-SA-PURE-XL".
+  if (req.query.name) {
+    const wanted = String(req.query.name).trim();
+    if (wanted) {
+      filter["identity.productName"] = new RegExp(`^${escapeRegex(wanted)}$`, "i");
+    }
+  }
+
+  // Category groups are created per branch, so a category and a store can cancel
+  // each other out: pick DUPATTA while browsing a store that has no dupattas and
+  // the page goes blank, which reads as a broken category rather than an empty
+  // store. The category is what the shopper just clicked, so it wins — drop the
+  // store narrowing when the pair would return nothing.
+  if (groupClause && branchClause) {
+    const withBoth = await Item.countDocuments(filter);
+    if (withBoth === 0) delete filter.branch;
+  }
 
   // Attribute facets, matched case-insensitively so "Ruby Red" and "ruby red" agree.
   const facetMap = {
@@ -1923,7 +1995,10 @@ const catalog = asyncHandler(async (req, res) => {
   const sort = SORTS[req.query.sort] || "-identity.featured -createdAt";
 
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 24, 1), 60);
+  // Use the existing store-aware catalog route for the full published list per
+  // selected branch. Keep the upper bound high enough that a storefront can
+  // actually surface all admin items without a second API.
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 5000, 1), 5000);
 
   const [total, docs] = await Promise.all([
     Item.countDocuments(filter),
@@ -2200,9 +2275,12 @@ const productDetail = asyncHandler(async (req, res) => {
       videos: item.videos || [],
       gifs: item.gifs || [],
       documents: item.documents || [],
+      // See toCard: stock does not gate buying while currentStock is unreliable.
+      // quantity is the per-order cap so the stepper works and the "only N left"
+      // nudge never fires on a figure we don't trust.
       stock: {
-        inStock: (item.inventory?.currentStock || 0) > 0,
-        quantity: item.inventory?.currentStock || 0,
+        inStock: true,
+        quantity: 20,
         unit: item.inventory?.unitOfMeasure || "pcs",
       },
       group: item.group,
@@ -2306,11 +2384,15 @@ const recordVisit = asyncHandler(async (req, res) => {
 // absent. The flag lives in Woven Essence's storefrontGroups side table, not
 // on the ERP's rows; see models/StorefrontGroup.js.
 //
-// Subcategories are that group's children in the ERP's own hierarchy: a
-// productgroup with parentId set is a subgroup of the row it points at.
-// Children come through with their parent and are NOT published separately —
-// publishing a category publishes what sits under it, which is what "publish
-// DUPATTA and it appears" means to the person clicking the toggle.
+// Each category's entries are the distinct product NAMES actually on sale under
+// it, so hovering DUPATTA lists what a shopper can really click through to.
+//
+// They used to be the ERP category's own child groups, but nothing in the
+// catalogue is filed under one, so every entry opened an empty page. The name
+// comes off the published product rather than the ERP row: publish copies it
+// from printDescription/supplierDescription/itemCode, so it is the same value,
+// it matches what the cards show, and it avoids a lookup across ~24k rows on
+// every header render.
 //
 // Not branch-filtered. Publishing is an explicit editorial decision about the
 // storefront as a whole, and these rows carry an ERP business rather than a
@@ -2322,26 +2404,57 @@ const headerCategories = asyncHandler(async (req, res) => {
   const ids = flags.map((f) => f.productGroup);
   if (!ids.length) return res.json({ success: true, data: [] });
 
-  // The published groups themselves, and every child of one, in two queries.
-  const [groups, children] = await Promise.all([
+  const [groups, appGroups] = await Promise.all([
     ProductGroup.find({ _id: { $in: ids } }).select("name").sort("name").lean(),
-    ProductGroup.find({ parentId: { $in: ids } }).select("name parentId").sort("name").lean(),
+    // The Woven Essence groups mirroring those ERP categories — one per branch
+    // that carries the category. See groupFilterFor for the same resolution.
+    Group.find({ erpProductGroup: { $in: ids }, isDeleted: { $ne: true } })
+      .select("_id erpProductGroup")
+      .lean(),
   ]);
 
-  const subsByParent = new Map();
-  children.forEach((child) => {
-    const key = String(child.parentId);
-    if (!subsByParent.has(key)) subsByParent.set(key, []);
-    subsByParent.get(key).push({ id: String(child._id), name: child.name || "" });
+  const categoryOfGroup = new Map(
+    appGroups.map((g) => [String(g._id), String(g.erpProductGroup)]),
+  );
+  const groupIds = appGroups.map((g) => g._id);
+
+  const rows = groupIds.length
+    ? await Item.aggregate([
+        { $match: { ...LIVE_ITEM, group: { $in: groupIds } } },
+        {
+          $group: {
+            _id: { group: "$group", name: "$identity.productName" },
+            count: { $sum: 1 },
+          },
+        },
+      ])
+    : [];
+
+  // A name can appear under the same category in more than one branch, so the
+  // counts are summed rather than listed twice.
+  const subsByCategory = new Map();
+  rows.forEach((row) => {
+    const category = categoryOfGroup.get(String(row._id.group));
+    const name = String(row._id.name || "").trim();
+    if (!category || !name) return;
+    if (!subsByCategory.has(category)) subsByCategory.set(category, new Map());
+    const bucket = subsByCategory.get(category);
+    bucket.set(name, (bucket.get(name) || 0) + row.count);
   });
 
   res.json({
     success: true,
-    data: groups.map((g) => ({
-      id: String(g._id),
-      name: g.name || "",
-      subs: subsByParent.get(String(g._id)) || [],
-    })),
+    data: groups.map((g) => {
+      const bucket = subsByCategory.get(String(g._id)) || new Map();
+      return {
+        id: String(g._id),
+        name: g.name || "",
+        // id IS the product name — it is what ?name= filters the catalogue on.
+        subs: [...bucket.entries()]
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([name, count]) => ({ id: name, name, count })),
+      };
+    }),
   });
 });
 

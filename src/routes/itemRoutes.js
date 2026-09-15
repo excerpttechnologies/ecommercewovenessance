@@ -43,6 +43,12 @@ router.use(scopeToAssignedBranch);
 
 router.get("/dashboard", ctrl.dashboard);
 router.get("/barcode-label-products", ctrl.listAugustProducts);
+router.get("/by-source", ctrl.listBySource);
+router.post(
+  "/bulk-publish",
+  requireRole("super_admin", "branch_admin"),
+  ctrl.bulkPublishFromLabels,
+);
 router.get("/export/excel", ctrl.exportExcel);
 router.get("/export/pdf", ctrl.exportPdf);
 router.post(

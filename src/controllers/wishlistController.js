@@ -75,7 +75,8 @@ async function buildView(list) {
         sellingPrice: selling,
         discountPercent: mrp && selling && mrp > selling ? Math.round(((mrp - selling) / mrp) * 100) : null,
         currency: item.pricing?.currency || "INR",
-        inStock: stock > 0,
+        // Matches the rest of the shop: anything still listed reads as buyable.
+        inStock: true,
         rating: item.reviews?.averageRating || 0,
         reviewCount: item.reviews?.totalReviews || 0,
         image: hero ? { url: hero.url, altText: hero.altText } : null,
@@ -86,8 +87,9 @@ async function buildView(list) {
           item.identity?.trending && "Trending",
           item.identity?.featured && "Featured",
         ].filter(Boolean),
-        available: live && stock > 0 && selling != null,
-        issue: !live ? "No longer available" : stock <= 0 ? "Sold out" : selling == null ? "Price on request" : null,
+        // Stock is not a blocker: anything still listed can be bought.
+        available: live && selling != null,
+        issue: !live ? "No longer available" : selling == null ? "Price on request" : null,
         addedAt: entry.addedAt,
       };
     });

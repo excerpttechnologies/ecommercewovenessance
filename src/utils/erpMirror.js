@@ -139,6 +139,52 @@ async function mirrorErpSelection({ branchId, erpGroupId, erpItemId }) {
 }
 
 /**
+ * Returns { group, subgroup } ids for the branch's catch-all "ERP Products /
+ * General" pair, creating them the first time.
+ *
+ * "Publish all" on the ERP products tab has nothing on a barcodeLabel row that
+ * maps to a Group/Subgroup, and asking the admin to pick one for thousands of
+ * rows defeats the point of a bulk button. So every bulk-published product is
+ * filed here; it can be moved to a proper group later through the edit form.
+ */
+async function ensureDefaultGroup(branchId) {
+  if (!branchId) throw new Error("branch is required");
+
+  let group = await Group.findOne({
+    branch: branchId,
+    groupCode: "ERP",
+    isDeleted: { $ne: true },
+  });
+  if (!group) {
+    group = await Group.create({
+      branch: branchId,
+      groupName: "ERP Products",
+      groupCode: await uniqueCode(Group, { branch: branchId }, "groupCode", "ERP"),
+      status: "active",
+      lifecycleStage: "published",
+    });
+  }
+
+  let subgroup = await Subgroup.findOne({
+    group: group._id,
+    subgroupCode: "GEN",
+    isDeleted: { $ne: true },
+  });
+  if (!subgroup) {
+    subgroup = await Subgroup.create({
+      branch: branchId,
+      group: group._id,
+      subgroupName: "General",
+      subgroupCode: await uniqueCode(Subgroup, { group: group._id }, "subgroupCode", "GEN"),
+      status: "active",
+      lifecycleStage: "published",
+    });
+  }
+
+  return { group: group._id, subgroup: subgroup._id };
+}
+
+/**
  * Returns the Woven Essence branch for an ERP branch, creating it if this is
  * the first time the ERP branch has been used.
  *
@@ -185,4 +231,4 @@ async function mirrorErpBranch(erpBusinessId) {
   return String(branch._id);
 }
 
-module.exports = { mirrorErpSelection, mirrorErpBranch };
+module.exports = { mirrorErpSelection, mirrorErpBranch, ensureDefaultGroup };

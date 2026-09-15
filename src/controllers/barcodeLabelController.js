@@ -176,11 +176,16 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Returns barcode-label products created on or after August 1, 2026. */
-const listAugustProducts = asyncHandler(async (req, res) => {
-  const search = String(req.query.q || "").trim();
-  const statusFilter = String(req.query.status || "").trim();
-  const seriesFilter = String(req.query.series || "").trim();
+/**
+ * Builds the Mongo filter for the ERP products list from the same q/status/
+ * series params the list endpoint takes. Shared with the bulk publish in
+ * itemController so "Publish all" targets exactly the rows the table shows,
+ * just without the page boundary.
+ */
+function buildAugustFilter({ q, status, series } = {}) {
+  const search = String(q || "").trim();
+  const statusFilter = String(status || "").trim();
+  const seriesFilter = String(series || "").trim();
 
   // NOTE: there used to be an `imageUrl: { $exists: true, $nin: ["", null] }`
   // gate here. It never actually ran (see models/BarcodeLabel.js — strictQuery
@@ -197,18 +202,24 @@ const listAugustProducts = asyncHandler(async (req, res) => {
   }
 
   // If a series parameter is provided (e.g. series=8A) restrict rows to those
-  // whose identifier starts with the series string. This checks the ERP's
-  // identifier fields so the frontend can ask the server for only the 8A series.
+  // whose displayed barcode starts with the series string. Matched only
+  // against barcodeNo/barcodeGenerated — the same two fields the frontend's
+  // Barcode column reads (barcodeNo, falling back to barcodeGenerated).
+  // itemCode/oldBarcode used to be included too, which let rows whose actual
+  // barcode was something else (e.g. "G1316*05162*4*1") sneak into the list
+  // just because an unrelated field happened to start with "8A".
   if (seriesFilter) {
     const escaped = escapeRegExp(seriesFilter);
     const anchored = new RegExp(`^${escaped}`, "i");
+    const noBarcodeNo = { barcodeNo: { $in: [null, ""] } };
     filter.$and = filter.$and || [];
     filter.$and.push({
       $or: [
-        { itemCode: anchored },
+        // Mirrors the frontend's `barcodeNo || barcodeGenerated`: only fall
+        // through to barcodeGenerated when barcodeNo is empty/missing, so a
+        // row can't match on a field that isn't the one actually displayed.
         { barcodeNo: anchored },
-        { barcodeGenerated: anchored },
-        { oldBarcode: anchored },
+        { $and: [noBarcodeNo, { barcodeGenerated: anchored }] },
       ],
     });
   }
@@ -223,7 +234,14 @@ const listAugustProducts = asyncHandler(async (req, res) => {
     });
   }
 
-  const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+  return filter;
+}
+
+/** Returns barcode-label products created on or after August 1, 2026. */
+const listAugustProducts = asyncHandler(async (req, res) => {
+  const filter = buildAugustFilter(req.query);
+
+  const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50);
   const page = Math.max(Number(req.query.page) || 1, 1);
   const [documents, total] = await Promise.all([
     BarcodeLabel.find(filter)
@@ -251,4 +269,4 @@ const listAugustProducts = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { listAugustProducts };
+module.exports = { listAugustProducts, buildAugustFilter };

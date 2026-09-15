@@ -1344,7 +1344,6 @@ async function priceLines(rawLines, { method }) {
       throw err;
     }
 
-    const stock = item.inventory?.currentStock || 0;
     const price = item.pricing?.sellingPrice;
     const name = item.identity?.displayName || item.identity?.productName || "Saree";
 
@@ -1353,13 +1352,7 @@ async function priceLines(rawLines, { method }) {
       err.statusCode = 409;
       throw err;
     }
-    if (stock < cartLine.quantity) {
-      const err = new Error(
-        stock === 0 ? `"${name}" has sold out` : `Only ${stock} of "${name}" left — please reduce the quantity`
-      );
-      err.statusCode = 409;
-      throw err;
-    }
+    // Stock deliberately does not block checkout — see reserveStock below.
     if (item.shipping?.codAvailable === false) anyCodBlocked = true;
 
     const qty = cartLine.quantity;
@@ -1781,13 +1774,18 @@ const placeOrder = asyncHandler(async (req, res) => {
 });
 
 /**
- * Reduces stock for each line, guarded so it can't go negative under
- * concurrency: the update only applies while enough stock remains.
+ * Records the sale against each line.
+ *
+ * Stock no longer gates a purchase: anything visible in the shop can be bought,
+ * because the catalogue is published from the ERP faster than stock figures are
+ * kept up to date, and the old guard blocked almost every saree on the site.
+ * The counter is still decremented so reporting stays meaningful — it is simply
+ * allowed to go negative, which reads as "sold more than we had recorded".
  */
 async function reserveStock(order) {
   for (const line of order.lines) {
-    const result = await Item.updateOne(
-      { _id: line.item, "inventory.currentStock": { $gte: line.quantity } },
+    await Item.updateOne(
+      { _id: line.item },
       {
         $inc: {
           "inventory.currentStock": -line.quantity,
@@ -1797,12 +1795,6 @@ async function reserveStock(order) {
         },
       }
     );
-
-    if (result.modifiedCount === 0) {
-      const err = new Error(`"${line.productName}" sold out while you were checking out`);
-      err.statusCode = 409;
-      throw err;
-    }
   }
 }
 
